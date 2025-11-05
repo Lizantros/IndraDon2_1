@@ -54,6 +54,37 @@ export default {
           console.log(erreur)
         })
     },
+
+    // https://pouchdb.com/api.html#fetch_document
+    modifDoc(doc: any) {
+      this.db
+        .get(doc._id)
+        .then((docActuel: any) => {
+          docActuel.content = docActuel.content + ' , modif le : ' + new Date().toLocaleString() // Rajouter la date de la modif pour une dose légendaire de fun YAY
+
+          return this.db.put(docActuel)
+        })
+        .then((resultat: any) => {
+          console.log(resultat)
+          this.recupererTousLesDocs()
+        })
+        .catch((err: any) => {
+          console.log(err)
+        })
+    },
+
+    // https://pouchdb.com/api.html#delete_document
+    supprimerDoc(doc: any) {
+      this.db
+        .remove(doc._id, doc._rev)
+        .then((res: any) => {
+          console.log(res)
+          this.recupererTousLesDocs()
+        })
+        .catch((error: any) => {
+          console.log(error)
+        })
+    },
   },
 }
 </script>
@@ -66,6 +97,8 @@ export default {
       <p><strong>ID:</strong> {{ doc._id }}</p>
       <p><strong>Titre:</strong> {{ doc.title }}</p>
       <p><strong>Contenu:</strong> {{ doc.content }}</p>
+      <button @click="modifDoc(doc)">Modif</button>
+      <button @click="supprimerDoc(doc)">Suppr</button>
       <hr />
     </div>
   </div>
