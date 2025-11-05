@@ -30,12 +30,38 @@ export default {
           console.log(err)
         })
     },
+
+    genererObjetDemo() {
+      const timestamp = Date.now()
+      return {
+        _id: 'le meilleur nom de l univers... oui j en ai marre' + timestamp,
+        title: 'Doc ' + timestamp,
+        content: 'cest super fake ' + timestamp,
+      }
+    },
+
+    //https://pouchdb.com/api.html#create_document
+    ajouterDoc() {
+      const nouveauDoc = this.genererObjetDemo()
+
+      this.db
+        .put(nouveauDoc)
+        .then((reponse: any) => {
+          console.log(reponse)
+          this.recupererTousLesDocs()
+        })
+        .catch((erreur: any) => {
+          console.log(erreur)
+        })
+    },
   },
 }
 </script>
 
 <template>
   <div>
+    <button @click="ajouterDoc">Ajouter un doc</button>
+
     <div v-for="doc in documents" :key="doc._id">
       <p><strong>ID:</strong> {{ doc._id }}</p>
       <p><strong>Titre:</strong> {{ doc.title }}</p>
