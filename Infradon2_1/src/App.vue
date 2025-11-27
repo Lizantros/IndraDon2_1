@@ -102,7 +102,9 @@ export default {
       this.db
         .allDocs({ include_docs: true })
         .then((result: any) => {
-          this.documents = result.rows.map((row: any) => row.doc)
+          this.documents = result.rows
+            .map((row: any) => row.doc)
+            .filter((doc: any) => !doc._id.startsWith('_design')) // c'est pour les modifs pour les dcs qui commencent par _
         })
         .catch((err: any) => {
           console.log(err)
