@@ -13,6 +13,9 @@ export default {
       syncHandler: null as any,
       isOffline: true,
       searchQuery: '',
+      nouveauTitre: '',
+      nouveauContenu: '',
+      nouveauCommentaireInput: {} as Record<string, string>
     }
   },
 
@@ -66,8 +69,10 @@ export default {
       for (let i = 1; i <= 10; i++) {
         docs.push({
           _id: new Date().toISOString() + '_' + i,
-          title: `document Factory ${i}`,
+          title: `Post Factory ${i}`,
           content: `contenu gen auto ${i}`,
+          likes: 0,
+          comments: []
         })
       }
       this.db
@@ -111,30 +116,65 @@ export default {
         })
     },
 
-    genererObjetDemo() {
-      const timestamp = Date.now()
-      return {
-        _id: 'local_doc_' + timestamp,
-        title: 'doc local ' + timestamp,
-        content: 'contenu créer en local ' + timestamp,
-      }
-    },
-
     ajouterDoc() {
-      const nouveauDoc = this.genererObjetDemo()
+      const nouveauDoc = {
+        _id: new Date().toISOString(),
+        title: this.nouveauTitre,
+        content: this.nouveauContenu,
+        likes: 0,
+        comments: []
+      }
       this.db
         .put(nouveauDoc)
+        .then(() => {
+          this.nouveauTitre = ''
+          this.nouveauContenu = ''
+          this.recupererTousLesDocs()
+        })
+        .catch((err: any) => console.log(err))
+    },
+
+    likerPost(doc: any) {
+      this.db
+        .get(doc._id)
+        .then((docActuel: any) => {
+          docActuel.likes = (docActuel.likes || 0) + 1
+          return this.db.put(docActuel)
+        })
         .then(() => {
           this.recupererTousLesDocs()
         })
         .catch((err: any) => console.log(err))
     },
 
-    modifDoc(doc: any) {
+    ajouterCommentaire(doc: any) {
+      const texte = this.nouveauCommentaireInput[doc._id]
+      if (!texte) return
+
       this.db
         .get(doc._id)
         .then((docActuel: any) => {
-          docActuel.content = docActuel.content + ' (Modifié)'
+          if (!docActuel.comments) docActuel.comments = []
+          docActuel.comments.push({
+            text: texte,
+            likes: 0
+          })
+          return this.db.put(docActuel)
+        })
+        .then(() => {
+          this.nouveauCommentaireInput[doc._id] = ''
+          this.recupererTousLesDocs()
+        })
+        .catch((err: any) => console.log(err))
+    },
+
+    likerCommentaire(doc: any, index: number) {
+      this.db
+        .get(doc._id)
+        .then((docActuel: any) => {
+          if (docActuel.comments && docActuel.comments[index]) {
+             docActuel.comments[index].likes = (docActuel.comments[index].likes || 0) + 1
+          }
           return this.db.put(docActuel)
         })
         .then(() => {
@@ -166,7 +206,9 @@ export default {
         {{ isOffline ? 'Mode HL(se connecter)' : 'Mode L (se déco)' }}
       </button>
 
-      <div style="margin-top: 10px">
+      <div style="margin-top: 10px; border: 1px solid #ccc; padding: 10px;">
+        <input v-model="nouveauTitre" placeholder="Titre" style="margin-right: 5px;">
+        <input v-model="nouveauContenu" placeholder="Contenu" style="margin-right: 5px;">
         <button @click="ajouterDoc">Ajouter un doc</button>
         <button @click="factory" style="margin-left: 10px">Facto</button>
       </div>
@@ -204,8 +246,24 @@ export default {
       <p><strong>ID:</strong> {{ doc._id }}</p>
       <p><strong>Titre:</strong> {{ doc.title }}</p>
       <p><strong>Contenu:</strong> {{ doc.content }}</p>
-      <button @click="modifDoc(doc)">Modif</button>
-      <button @click="supprimerDoc(doc)">Suppr</button>
+
+      <div style="margin-bottom: 10px;">
+        <button @click="likerPost(doc)">Like Doc ({{ doc.likes || 0 }})</button>
+        <button @click="supprimerDoc(doc)" style="margin-left: 5px;">Suppr</button>
+      </div>
+
+      <div style="background: #eee; padding: 10px; margin-top: 10px;">
+        <strong>Commentaires:</strong>
+        <div v-for="(com, idx) in doc.comments" :key="idx" style="border-bottom: 1px solid #ccc; padding: 5px;">
+            {{ com.text }}
+            <button @click="likerCommentaire(doc, idx)" style="font-size: 0.8em; margin-left: 5px;">Like Com ({{ com.likes || 0 }})</button>
+        </div>
+
+        <div style="margin-top: 5px;">
+            <input v-model="nouveauCommentaireInput[doc._id]" placeholder="Nouveau commentaire">
+            <button @click="ajouterCommentaire(doc)">Ajouter Com</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
