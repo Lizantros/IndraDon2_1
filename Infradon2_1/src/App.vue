@@ -10,11 +10,15 @@ export default {
       db: null as any,
       remoteDB: null as any,
       documents: [] as any[],
+
       syncHandler: null as any,
       isOffline: true,
       searchQuery: '',
       nouveauTitre: '',
       nouveauContenu: '',
+      selectedCategory: '',
+      categories: [] as any[],
+      nouvelleCategorie: '',
       nouveauCommentaireInput: {} as Record<string, string>
     }
   },
@@ -30,7 +34,7 @@ export default {
 
       this.db
         .createIndex({
-          index: { fields: ['title'] },
+          index: { fields: ['title', 'type'] },
         })
         .then(() => {})
         .catch((err: any) => {
@@ -66,11 +70,16 @@ export default {
 
     factory() {
       const docs = []
+      docs.push({ _id: new Date().toISOString() + '_cat1', type: 'category', name: 'cat1' })
+      docs.push({ _id: new Date().toISOString() + '_cat2', type: 'category', name: 'cat2' })
+
       for (let i = 1; i <= 10; i++) {
         docs.push({
           _id: new Date().toISOString() + '_' + i,
+          type: 'post',
           title: `Post Factory ${i}`,
           content: `contenu gen auto ${i}`,
+          category: 'cat1',
           likes: 0,
           comments: []
         })
@@ -92,6 +101,7 @@ export default {
       this.db
         .find({
           selector: {
+            type: 'post',
             title: { $regex: RegExp(this.searchQuery, 'i') },
           },
         })
@@ -107,18 +117,35 @@ export default {
       this.db
         .allDocs({ include_docs: true })
         .then((result: any) => {
-          this.documents = result.rows
+          const tous = result.rows
             .map((row: any) => row.doc)
-            .filter((doc: any) => !doc._id.startsWith('_design')) // c'est pour les modifs pour les dcs qui commencent par _
+            .filter((doc: any) => !doc._id.startsWith('_design'))
+          this.documents = tous.filter((doc: any) => doc.type === 'post' || !doc.type)
+          this.categories = tous.filter((doc: any) => doc.type === 'category')
         })
         .catch((err: any) => {
           console.log(err)
         })
     },
 
+    ajouterCategorie() {
+      if (!this.nouvelleCategorie) return
+      const cat = {
+        _id: new Date().toISOString() + '_cat',
+        type: 'category',
+        name: this.nouvelleCategorie
+      }
+      this.db.put(cat).then(() => {
+        this.nouvelleCategorie = ''
+        this.recupererTousLesDocs()
+      }).catch((err: any) => console.log(err))
+    },
+
     ajouterDoc() {
       const nouveauDoc = {
         _id: new Date().toISOString(),
+        type: 'post',
+        category: this.selectedCategory,
         title: this.nouveauTitre,
         content: this.nouveauContenu,
         likes: 0,
@@ -129,6 +156,7 @@ export default {
         .then(() => {
           this.nouveauTitre = ''
           this.nouveauContenu = ''
+          this.selectedCategory = ''
           this.recupererTousLesDocs()
         })
         .catch((err: any) => console.log(err))
@@ -207,8 +235,19 @@ export default {
       </button>
 
       <div style="margin-top: 10px; border: 1px solid #ccc; padding: 10px;">
+        <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #ccc">
+          <input v-model="nouvelleCategorie" placeholder="Nouvelle Catégorie">
+          <button @click="ajouterCategorie">Ajouter cat</button>
+        </div>
+
         <input v-model="nouveauTitre" placeholder="Titre" style="margin-right: 5px;">
         <input v-model="nouveauContenu" placeholder="Contenu" style="margin-right: 5px;">
+
+        <select v-model="selectedCategory">
+            <option value="">Caté</option>
+            <option v-for="c in categories" :key="c._id" :value="c.name">{{ c.name }}</option>
+        </select>
+
         <button @click="ajouterDoc">Ajouter un doc</button>
         <button @click="factory" style="margin-left: 10px">Facto</button>
       </div>
@@ -244,7 +283,7 @@ export default {
       style="border: 1px solid #ccc; margin: 10px 0; padding: 10px"
     >
       <p><strong>ID:</strong> {{ doc._id }}</p>
-      <p><strong>Titre:</strong> {{ doc.title }}</p>
+      <p><strong>Titre:</strong> {{ doc.title }} <span v-if="doc.category">({{ doc.category }})</span></p>
       <p><strong>Contenu:</strong> {{ doc.content }}</p>
 
       <div style="margin-bottom: 10px;">
