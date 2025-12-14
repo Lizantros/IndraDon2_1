@@ -4,12 +4,29 @@ import PouchDBFind from 'pouchdb-find'
 
 PouchDB.plugin(PouchDBFind)
 
+declare interface Comment {
+  text: string
+  likes: number
+}
+
+declare interface Post {
+  _id: string
+  _rev?: string
+  type: string
+  title?: string
+  content?: string
+  category?: string
+  name?: string
+  likes?: number
+  comments?: Comment[]
+}
+
 export default {
   data() {
     return {
       db: null as any,
       remoteDB: null as any,
-      documents: [] as any[],
+      documents: [] as Post[],
 
       syncHandler: null as any,
       isOffline: true,
@@ -19,7 +36,7 @@ export default {
       selectedCategory: '',
       categories: [] as any[],
       nouvelleCategorie: '',
-      nouveauCommentaireInput: {} as Record<string, string>
+      nouveauCommentaireInput: {} as Record<string, string>,
     }
   },
 
@@ -69,7 +86,7 @@ export default {
     },
 
     factory() {
-      const docs = []
+      const docs: Post[] = []
       docs.push({ _id: new Date().toISOString() + '_cat1', type: 'category', name: 'cat1' })
       docs.push({ _id: new Date().toISOString() + '_cat2', type: 'category', name: 'cat2' })
 
@@ -81,7 +98,7 @@ export default {
           content: `contenu gen auto ${i}`,
           category: 'cat1',
           likes: 0,
-          comments: []
+          comments: [],
         })
       }
       this.db
@@ -106,7 +123,7 @@ export default {
           },
         })
         .then((result: any) => {
-          this.documents = result.docs
+          this.documents = result.docs as Post[]
         })
         .catch((err: any) => {
           console.log(err)
@@ -130,26 +147,29 @@ export default {
 
     ajouterCategorie() {
       if (!this.nouvelleCategorie) return
-      const cat = {
+      const cat: Post = {
         _id: new Date().toISOString() + '_cat',
         type: 'category',
-        name: this.nouvelleCategorie
+        name: this.nouvelleCategorie,
       }
-      this.db.put(cat).then(() => {
-        this.nouvelleCategorie = ''
-        this.recupererTousLesDocs()
-      }).catch((err: any) => console.log(err))
+      this.db
+        .put(cat)
+        .then(() => {
+          this.nouvelleCategorie = ''
+          this.recupererTousLesDocs()
+        })
+        .catch((err: any) => console.log(err))
     },
 
     ajouterDoc() {
-      const nouveauDoc = {
+      const nouveauDoc: Post = {
         _id: new Date().toISOString(),
         type: 'post',
         category: this.selectedCategory,
         title: this.nouveauTitre,
         content: this.nouveauContenu,
         likes: 0,
-        comments: []
+        comments: [],
       }
       this.db
         .put(nouveauDoc)
@@ -162,10 +182,10 @@ export default {
         .catch((err: any) => console.log(err))
     },
 
-    likerPost(doc: any) {
+    likerPost(doc: Post) {
       this.db
         .get(doc._id)
-        .then((docActuel: any) => {
+        .then((docActuel: Post) => {
           docActuel.likes = (docActuel.likes || 0) + 1
           return this.db.put(docActuel)
         })
@@ -175,17 +195,17 @@ export default {
         .catch((err: any) => console.log(err))
     },
 
-    ajouterCommentaire(doc: any) {
+    ajouterCommentaire(doc: Post) {
       const texte = this.nouveauCommentaireInput[doc._id]
       if (!texte) return
 
       this.db
         .get(doc._id)
-        .then((docActuel: any) => {
+        .then((docActuel: Post) => {
           if (!docActuel.comments) docActuel.comments = []
           docActuel.comments.push({
             text: texte,
-            likes: 0
+            likes: 0,
           })
           return this.db.put(docActuel)
         })
@@ -196,12 +216,12 @@ export default {
         .catch((err: any) => console.log(err))
     },
 
-    likerCommentaire(doc: any, index: number) {
+    likerCommentaire(doc: Post, index: number) {
       this.db
         .get(doc._id)
-        .then((docActuel: any) => {
+        .then((docActuel: Post) => {
           if (docActuel.comments && docActuel.comments[index]) {
-             docActuel.comments[index].likes = (docActuel.comments[index].likes || 0) + 1
+            docActuel.comments[index].likes = (docActuel.comments[index].likes || 0) + 1
           }
           return this.db.put(docActuel)
         })
@@ -211,13 +231,15 @@ export default {
         .catch((err: any) => console.log(err))
     },
 
-    supprimerDoc(doc: any) {
-      this.db
-        .remove(doc._id, doc._rev)
-        .then(() => {
-          this.recupererTousLesDocs()
-        })
-        .catch((error: any) => console.log(error))
+    supprimerDoc(doc: Post) {
+      if (doc._rev) {
+        this.db
+          .remove(doc._id, doc._rev)
+          .then(() => {
+            this.recupererTousLesDocs()
+          })
+          .catch((error: any) => console.log(error))
+      }
     },
   },
 }
@@ -234,18 +256,18 @@ export default {
         {{ isOffline ? 'Mode HL(se connecter)' : 'Mode L (se déco)' }}
       </button>
 
-      <div style="margin-top: 10px; border: 1px solid #ccc; padding: 10px;">
+      <div style="margin-top: 10px; border: 1px solid #ccc; padding: 10px">
         <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #ccc">
-          <input v-model="nouvelleCategorie" placeholder="Nouvelle Catégorie">
+          <input v-model="nouvelleCategorie" placeholder="Nouvelle Catégorie" />
           <button @click="ajouterCategorie">Ajouter cat</button>
         </div>
 
-        <input v-model="nouveauTitre" placeholder="Titre" style="margin-right: 5px;">
-        <input v-model="nouveauContenu" placeholder="Contenu" style="margin-right: 5px;">
+        <input v-model="nouveauTitre" placeholder="Titre" style="margin-right: 5px" />
+        <input v-model="nouveauContenu" placeholder="Contenu" style="margin-right: 5px" />
 
         <select v-model="selectedCategory">
-            <option value="">Caté</option>
-            <option v-for="c in categories" :key="c._id" :value="c.name">{{ c.name }}</option>
+          <option value="">Caté</option>
+          <option v-for="c in categories" :key="c._id" :value="c.name">{{ c.name }}</option>
         </select>
 
         <button @click="ajouterDoc">Ajouter un doc</button>
@@ -283,24 +305,33 @@ export default {
       style="border: 1px solid #ccc; margin: 10px 0; padding: 10px"
     >
       <p><strong>ID:</strong> {{ doc._id }}</p>
-      <p><strong>Titre:</strong> {{ doc.title }} <span v-if="doc.category">({{ doc.category }})</span></p>
+      <p>
+        <strong>Titre:</strong> {{ doc.title }}
+        <span v-if="doc.category">({{ doc.category }})</span>
+      </p>
       <p><strong>Contenu:</strong> {{ doc.content }}</p>
 
-      <div style="margin-bottom: 10px;">
+      <div style="margin-bottom: 10px">
         <button @click="likerPost(doc)">Like Doc ({{ doc.likes || 0 }})</button>
-        <button @click="supprimerDoc(doc)" style="margin-left: 5px;">Suppr</button>
+        <button @click="supprimerDoc(doc)" style="margin-left: 5px">Suppr</button>
       </div>
 
-      <div style="background: #eee; padding: 10px; margin-top: 10px;">
+      <div style="background: #eee; padding: 10px; margin-top: 10px">
         <strong>Commentaires:</strong>
-        <div v-for="(com, idx) in doc.comments" :key="idx" style="border-bottom: 1px solid #ccc; padding: 5px;">
-            {{ com.text }}
-            <button @click="likerCommentaire(doc, idx)" style="font-size: 0.8em; margin-left: 5px;">Like Com ({{ com.likes || 0 }})</button>
+        <div
+          v-for="(com, idx) in doc.comments"
+          :key="idx"
+          style="border-bottom: 1px solid #ccc; padding: 5px"
+        >
+          {{ com.text }}
+          <button @click="likerCommentaire(doc, idx)" style="font-size: 0.8em; margin-left: 5px">
+            Like Com ({{ com.likes || 0 }})
+          </button>
         </div>
 
-        <div style="margin-top: 5px;">
-            <input v-model="nouveauCommentaireInput[doc._id]" placeholder="Nouveau commentaire">
-            <button @click="ajouterCommentaire(doc)">Ajouter Com</button>
+        <div style="margin-top: 5px">
+          <input v-model="nouveauCommentaireInput[doc._id]" placeholder="Nouveau commentaire" />
+          <button @click="ajouterCommentaire(doc)">Ajouter Com</button>
         </div>
       </div>
     </div>
