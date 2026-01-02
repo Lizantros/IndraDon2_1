@@ -5,6 +5,10 @@ import PouchDBFind from 'pouchdb-find'
 PouchDB.plugin(PouchDBFind)
 
 declare interface Comment {
+  _id: string
+  _rev?: string
+  type: string
+  post_id: string
   text: string
   likes: number
 }
@@ -18,7 +22,7 @@ declare interface Post {
   category?: string
   name?: string
   likes?: number
-  comments?: Comment[]
+  virtual_comments?: Comment[]
 }
 
 export default {
@@ -54,9 +58,13 @@ export default {
           index: { fields: ['title', 'type'] },
         })
         .then(() => {})
-        .catch((err: any) => {
-          console.log('Erreur créa index', err)
+        .catch((err: any) => console.log(err))
+
+      this.db
+        .createIndex({
+          index: { fields: ['post_id', 'type'] },
         })
+        .catch((err: any) => console.log(err))
 
       this.recupererTousLesDocs()
     },
@@ -86,19 +94,28 @@ export default {
     },
 
     factory() {
-      const docs: Post[] = []
+      const docs: any[] = []
       docs.push({ _id: new Date().toISOString() + '_cat1', type: 'category', name: 'cat1' })
       docs.push({ _id: new Date().toISOString() + '_cat2', type: 'category', name: 'cat2' })
 
       for (let i = 1; i <= 10; i++) {
+        const postId = new Date().toISOString() + '_' + i
+
         docs.push({
-          _id: new Date().toISOString() + '_' + i,
+          _id: postId,
           type: 'post',
           title: `Post Factory ${i}`,
           content: `contenu gen auto ${i}`,
           category: 'cat1',
           likes: 0,
-          comments: [],
+        })
+
+        docs.push({
+          _id: postId + '_com1',
+          type: 'comment',
+          post_id: postId,
+          text: `Commentaire séparé 1 pour post ${i}`,
+          likes: 0,
         })
       }
       this.db
@@ -137,7 +154,15 @@ export default {
           const tous = result.rows
             .map((row: any) => row.doc)
             .filter((doc: any) => !doc._id.startsWith('_design'))
-          this.documents = tous.filter((doc: any) => doc.type === 'post' || !doc.type)
+
+          const posts = tous.filter((doc: any) => doc.type === 'post' || !doc.type)
+          const comments = tous.filter((doc: any) => doc.type === 'comment')
+
+          posts.forEach((p: Post) => {
+            p.virtual_comments = comments.filter((c: Comment) => c.post_id === p._id)
+          })
+
+          this.documents = posts
           this.categories = tous.filter((doc: any) => doc.type === 'category')
         })
         .catch((err: any) => {
@@ -147,7 +172,7 @@ export default {
 
     ajouterCategorie() {
       if (!this.nouvelleCategorie) return
-      const cat: Post = {
+      const cat = {
         _id: new Date().toISOString() + '_cat',
         type: 'category',
         name: this.nouvelleCategorie,
@@ -169,7 +194,6 @@ export default {
         title: this.nouveauTitre,
         content: this.nouveauContenu,
         likes: 0,
-        comments: [],
       }
       this.db
         .put(nouveauDoc)
@@ -183,6 +207,9 @@ export default {
     },
 
     likerPost(doc: Post) {
+      const docToUpdate = { ...doc }
+      delete docToUpdate.virtual_comments
+
       this.db
         .get(doc._id)
         .then((docActuel: Post) => {
@@ -199,16 +226,16 @@ export default {
       const texte = this.nouveauCommentaireInput[doc._id]
       if (!texte) return
 
+      const com: Comment = {
+        _id: new Date().toISOString() + '_com',
+        type: 'comment',
+        post_id: doc._id,
+        text: texte,
+        likes: 0,
+      }
+
       this.db
-        .get(doc._id)
-        .then((docActuel: Post) => {
-          if (!docActuel.comments) docActuel.comments = []
-          docActuel.comments.push({
-            text: texte,
-            likes: 0,
-          })
-          return this.db.put(docActuel)
-        })
+        .put(com)
         .then(() => {
           this.nouveauCommentaireInput[doc._id] = ''
           this.recupererTousLesDocs()
@@ -217,13 +244,14 @@ export default {
     },
 
     likerCommentaire(doc: Post, index: number) {
+      if (!doc.virtual_comments || !doc.virtual_comments[index]) return
+      const comId = doc.virtual_comments[index]._id
+
       this.db
-        .get(doc._id)
-        .then((docActuel: Post) => {
-          if (docActuel.comments && docActuel.comments[index]) {
-            docActuel.comments[index].likes = (docActuel.comments[index].likes || 0) + 1
-          }
-          return this.db.put(docActuel)
+        .get(comId)
+        .then((comActuel: Comment) => {
+          comActuel.likes = (comActuel.likes || 0) + 1
+          return this.db.put(comActuel)
         })
         .then(() => {
           this.recupererTousLesDocs()
@@ -319,7 +347,7 @@ export default {
       <div style="background: #eee; padding: 10px; margin-top: 10px">
         <strong>Commentaires:</strong>
         <div
-          v-for="(com, idx) in doc.comments"
+          v-for="(com, idx) in doc.virtual_comments"
           :key="idx"
           style="border-bottom: 1px solid #ccc; padding: 5px"
         >
