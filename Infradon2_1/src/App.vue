@@ -17,10 +17,12 @@ declare interface Post {
   _id: string
   _rev?: string
   type: string
-  title?: string
-  content?: string
+  post_name: string     
+  post_content: string  
   category?: string
-  name?: string
+  attributes?: {
+    creation_date: any
+  }
   likes?: number
   virtual_comments?: Comment[]
 }
@@ -30,17 +32,22 @@ export default {
     return {
       db: null as any,
       remoteDB: null as any,
-      documents: [] as Post[],
+      dbComments: null as any,
+      remoteDBComments: null as any,
+
+      posts: [] as Post[],
+      categories: [] as any[],
 
       syncHandler: null as any,
+      syncCommentsHandler: null as any,
       isOffline: true,
-      searchQuery: '',
-      nouveauTitre: '',
-      nouveauContenu: '',
-      selectedCategory: '',
-      categories: [] as any[],
-      nouvelleCategorie: '',
-      nouveauCommentaireInput: {} as Record<string, string>,
+
+      query: '',
+      inputTitle: '',
+      inputBody: '',
+      inputCatName: '',
+      selectedCat: '',
+      draftComments: {} as Record<string, string>,
     }
   },
 
@@ -50,318 +57,416 @@ export default {
 
   methods: {
     initDB() {
-      this.db = new PouchDB('ma_db_locale')
-      this.remoteDB = new PouchDB('http://admin:de4Dke032e!@localhost:5984/ma_db')
+      this.db = new PouchDB('ma_db_posts_loic_peyramaure')
+      this.dbComments = new PouchDB('ma_db_comments_loic_peyramaure')
 
-      this.db
-        .createIndex({
-          index: { fields: ['title', 'type'] },
+      this.remoteDB = new PouchDB('http://admin:de4Dke032e!@localhost:5984/ma_db_posts_loic_peyramaure')
+      this.remoteDBComments = new PouchDB('http://admin:de4Dke032e!@localhost:5984/ma_db_comments_loic_peyramaure')
+
+      // Création des index (requis pour find et sort)
+      this.db.createIndex({ index: { fields: ['type'] } })
+        .then(() => {
+          return this.db.createIndex({ index: { fields: ['post_name'] } })
         })
-        .then(() => {})
-        .catch((err: any) => console.log(err))
-
-      this.db
-        .createIndex({
-          index: { fields: ['post_id', 'type'] },
+        .then(() => {
+          // Index requis pour le tri par likes
+          return this.db.createIndex({ index: { fields: ['likes'] } })
         })
+        .then(() => this.fetchData())
         .catch((err: any) => console.log(err))
-
-      this.recupererTousLesDocs()
+        
+      this.dbComments.createIndex({ index: { fields: ['post_id'] } })
+        .catch((err: any) => console.log(err))
     },
 
-    toggleMode() {
+    toggleSync() {
       if (this.isOffline) {
         this.isOffline = false
-        this.syncHandler = this.db
-          .sync(this.remoteDB, {
-            live: true,
-            retry: true,
-          })
-          .on('change', (info: any) => {
-            console.log(info)
-            if (this.searchQuery === '') this.recupererTousLesDocs()
-          })
-          .on('error', (err: any) => {
-            console.error(err)
-          })
+        const opts = { live: true, retry: true }
+        
+        this.syncHandler = this.db.sync(this.remoteDB, opts)
+          .on('change', () => this.fetchData())
+        
+        this.syncCommentsHandler = this.dbComments.sync(this.remoteDBComments, opts)
+          .on('change', () => this.fetchData())
       } else {
         this.isOffline = true
-        if (this.syncHandler) {
-          this.syncHandler.cancel()
-          this.syncHandler = null
-        }
+        if (this.syncHandler) this.syncHandler.cancel()
+        if (this.syncCommentsHandler) this.syncCommentsHandler.cancel()
+        this.syncHandler = null
+        this.syncCommentsHandler = null
       }
     },
 
-    factory() {
-      const docs: any[] = []
-      docs.push({ _id: new Date().toISOString() + '_cat1', type: 'category', name: 'cat1' })
-      docs.push({ _id: new Date().toISOString() + '_cat2', type: 'category', name: 'cat2' })
+    fetchData() {
+      const selectorPosts = { type: 'post' }
+      const selectorCats = { type: 'category' }
 
-      for (let i = 1; i <= 10; i++) {
-        const postId = new Date().toISOString() + '_' + i
-
-        docs.push({
-          _id: postId,
-          type: 'post',
-          title: `Post Factory ${i}`,
-          content: `contenu gen auto ${i}`,
-          category: 'cat1',
-          likes: 0,
+      this.db.find({ selector: selectorCats })
+        .then((resCats: any) => {
+          this.categories = resCats.docs
+          return this.db.find({ selector: selectorPosts })
         })
+        .then((resPosts: any) => {
+          const loadedPosts = resPosts.docs as Post[]
+          
+          return this.dbComments.allDocs({ include_docs: true })
+            .then((resComments: any) => {
+               const loadedComments = resComments.rows
+                 .map((row: any) => row.doc)
+                 .filter((d: any) => !d._id.startsWith('_design'))
 
-        docs.push({
-          _id: postId + '_com1',
-          type: 'comment',
-          post_id: postId,
-          text: `Commentaire séparé 1 pour post ${i}`,
-          likes: 0,
-        })
-      }
-      this.db
-        .bulkDocs(docs)
-        .then(() => {
-          this.recupererTousLesDocs()
+               loadedPosts.forEach((p: Post) => {
+                 p.virtual_comments = loadedComments.filter((c: Comment) => c.post_id === p._id)
+               })
+
+               this.posts = loadedPosts
+            })
         })
         .catch((err: any) => console.log(err))
     },
 
-    rechercher() {
-      if (!this.searchQuery) {
-        this.recupererTousLesDocs()
+    generateFakeData() {
+      const timestamp = new Date().toISOString()
+      const batchPosts: any[] = []
+      const batchComments: any[] = []
+
+      batchPosts.push({ _id: timestamp + '_cat1', type: 'category', name: 'Général' })
+      batchPosts.push({ _id: timestamp + '_cat2', type: 'category', name: 'Technique' })
+
+      for (let i = 1; i <= 5; i++) {
+        const pid = timestamp + '_post_' + i
+        batchPosts.push({
+          _id: pid,
+          type: 'post',
+          post_name: 'Post généré ' + i,
+          post_content: 'Ceci est le contenu du post numéro ' + i,
+          category: 'Général',
+          likes: 0,
+          attributes: { creation_date: new Date().toISOString() }
+        })
+        
+        batchComments.push({
+          _id: pid + '_c1',
+          type: 'comment',
+          post_id: pid,
+          text: 'Commentaire test ' + i,
+          likes: 0,
+        })
+      }
+
+      this.db.bulkDocs(batchPosts)
+        .then(() => this.dbComments.bulkDocs(batchComments))
+        .then(() => this.fetchData())
+        .catch((err: any) => console.log(err))
+    },
+
+    search() {
+      if (!this.query) {
+        this.fetchData()
         return
       }
-
-      this.db
-        .find({
-          selector: {
-            type: 'post',
-            title: { $regex: RegExp(this.searchQuery, 'i') },
-          },
-        })
-        .then((result: any) => {
-          this.documents = result.docs as Post[]
-        })
-        .catch((err: any) => {
-          console.log(err)
-        })
-    },
-
-    recupererTousLesDocs() {
-      this.db
-        .allDocs({ include_docs: true })
-        .then((result: any) => {
-          const tous = result.rows
-            .map((row: any) => row.doc)
-            .filter((doc: any) => !doc._id.startsWith('_design'))
-
-          const posts = tous.filter((doc: any) => doc.type === 'post' || !doc.type)
-          const comments = tous.filter((doc: any) => doc.type === 'comment')
-
-          posts.forEach((p: Post) => {
-            p.virtual_comments = comments.filter((c: Comment) => c.post_id === p._id)
+      this.db.find({
+        selector: {
+          type: 'post',
+          post_name: { $regex: RegExp(this.query, 'i') },
+        },
+      })
+      .then((result: any) => {
+        const foundPosts = result.docs as Post[]
+        this.dbComments.allDocs({ include_docs: true }).then((resCom: any) => {
+            const allComs = resCom.rows.map((r: any) => r.doc)
+            foundPosts.forEach(p => {
+               p.virtual_comments = allComs.filter((c: any) => c.post_id === p._id)
+            })
+            this.posts = foundPosts
           })
-
-          this.documents = posts
-          this.categories = tous.filter((doc: any) => doc.type === 'category')
-        })
-        .catch((err: any) => {
-          console.log(err)
-        })
+      })
+      .catch((err: any) => console.log(err))
     },
 
-    ajouterCategorie() {
-      if (!this.nouvelleCategorie) return
-      const cat = {
-        _id: new Date().toISOString() + '_cat',
-        type: 'category',
-        name: this.nouvelleCategorie,
+    topLikes() {
+      this.db.find({
+        selector: {
+          type: 'post',
+          likes: { $gte: 0 } 
+        },
+        sort: [{ 'likes': 'desc' }], 
+        limit: 10
+      })
+      .then((result: any) => {
+        const foundPosts = result.docs as Post[]
+        this.dbComments.allDocs({ include_docs: true }).then((resCom: any) => {
+            const allComs = resCom.rows.map((r: any) => r.doc)
+            foundPosts.forEach(p => {
+               p.virtual_comments = allComs.filter((c: any) => c.post_id === p._id)
+            })
+            this.posts = foundPosts
+          })
+      })
+      .catch((err: any) => console.log(err))
+    },
+
+    addCategory() {
+      if (!this.inputCatName) return
+      const cat = { 
+        _id: new Date().toISOString() + '_cat', 
+        type: 'category', 
+        name: this.inputCatName 
       }
-      this.db
-        .put(cat)
-        .then(() => {
-          this.nouvelleCategorie = ''
-          this.recupererTousLesDocs()
+      this.db.put(cat)
+        .then(() => { 
+          this.inputCatName = ''
+          this.fetchData() 
         })
         .catch((err: any) => console.log(err))
     },
 
-    ajouterDoc() {
-      const nouveauDoc: Post = {
+    addPost() {
+      const doc: Post = {
         _id: new Date().toISOString(),
         type: 'post',
-        category: this.selectedCategory,
-        title: this.nouveauTitre,
-        content: this.nouveauContenu,
+        category: this.selectedCat,
+        post_name: this.inputTitle,
+        post_content: this.inputBody,
         likes: 0,
+        attributes: { 
+          creation_date: new Date().toISOString() 
+        }
       }
-      this.db
-        .put(nouveauDoc)
+      this.db.put(doc)
         .then(() => {
-          this.nouveauTitre = ''
-          this.nouveauContenu = ''
-          this.selectedCategory = ''
-          this.recupererTousLesDocs()
+          this.inputTitle = ''
+          this.inputBody = ''
+          this.selectedCat = ''
+          this.fetchData()
         })
         .catch((err: any) => console.log(err))
     },
 
-    likerPost(doc: Post) {
-      const docToUpdate = { ...doc }
-      delete docToUpdate.virtual_comments
-
-      this.db
-        .get(doc._id)
-        .then((docActuel: Post) => {
-          docActuel.likes = (docActuel.likes || 0) + 1
-          return this.db.put(docActuel)
+    likePost(doc: Post) {
+      this.db.get(doc._id)
+        .then((curr: any) => {
+          curr.likes = (curr.likes || 0) + 1
+          return this.db.put(curr)
         })
-        .then(() => {
-          this.recupererTousLesDocs()
-        })
+        .then(() => this.fetchData())
         .catch((err: any) => console.log(err))
     },
 
-    ajouterCommentaire(doc: Post) {
-      const texte = this.nouveauCommentaireInput[doc._id]
-      if (!texte) return
+    deletePost(doc: Post) {
+      if (!doc._rev) return
+      this.db.remove(doc._id, doc._rev)
+        .then(() => this.fetchData())
+        .catch((err: any) => console.log(err))
+    },
 
+    addComment(post: Post) {
+      const txt = this.draftComments[post._id]
+      if (!txt) return
       const com: Comment = {
         _id: new Date().toISOString() + '_com',
         type: 'comment',
-        post_id: doc._id,
-        text: texte,
+        post_id: post._id,
+        text: txt,
         likes: 0,
       }
-
-      this.db
-        .put(com)
+      this.dbComments.put(com)
         .then(() => {
-          this.nouveauCommentaireInput[doc._id] = ''
-          this.recupererTousLesDocs()
+          this.draftComments[post._id] = ''
+          this.fetchData()
         })
         .catch((err: any) => console.log(err))
     },
 
-    likerCommentaire(doc: Post, index: number) {
-      if (!doc.virtual_comments || !doc.virtual_comments[index]) return
-      const comId = doc.virtual_comments[index]._id
-
-      this.db
-        .get(comId)
-        .then((comActuel: Comment) => {
-          comActuel.likes = (comActuel.likes || 0) + 1
-          return this.db.put(comActuel)
+    likeComment(post: Post, index: number) {
+      if (!post.virtual_comments?.[index]) return
+      const comId = post.virtual_comments[index]._id
+      this.dbComments.get(comId)
+        .then((c: any) => {
+          c.likes = (c.likes || 0) + 1
+          return this.dbComments.put(c)
         })
-        .then(() => {
-          this.recupererTousLesDocs()
-        })
+        .then(() => this.fetchData())
         .catch((err: any) => console.log(err))
-    },
-
-    supprimerDoc(doc: Post) {
-      if (doc._rev) {
-        this.db
-          .remove(doc._id, doc._rev)
-          .then(() => {
-            this.recupererTousLesDocs()
-          })
-          .catch((error: any) => console.log(error))
-      }
     },
   },
 }
 </script>
 
 <template>
-  <div style="padding: 20px">
-    <div style="margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 20px">
-      <button
-        @click="toggleMode"
-        :style="{ backgroundColor: isOffline ? 'salmon' : 'lightgreen' }"
-        style="padding: 10px; font-weight: bold"
-      >
-        {{ isOffline ? 'Mode HL(se connecter)' : 'Mode L (se déco)' }}
+  <div class="container">
+    
+    <div class="section header">
+      <h2>TP Infra Données 2 - Loïc Peyramaure</h2>
+      
+      <button @click="toggleSync" :class="isOffline ? 'btn-red' : 'btn-green'">
+        Statut: {{ isOffline ? 'OFFLINE (Local)' : 'ONLINE (Sync)' }}
       </button>
-
-      <div style="margin-top: 10px; border: 1px solid #ccc; padding: 10px">
-        <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #ccc">
-          <input v-model="nouvelleCategorie" placeholder="Nouvelle Catégorie" />
-          <button @click="ajouterCategorie">Ajouter cat</button>
-        </div>
-
-        <input v-model="nouveauTitre" placeholder="Titre" style="margin-right: 5px" />
-        <input v-model="nouveauContenu" placeholder="Contenu" style="margin-right: 5px" />
-
-        <select v-model="selectedCategory">
-          <option value="">Caté</option>
-          <option v-for="c in categories" :key="c._id" :value="c.name">{{ c.name }}</option>
-        </select>
-
-        <button @click="ajouterDoc">Ajouter un doc</button>
-        <button @click="factory" style="margin-left: 10px">Facto</button>
+      
+      <div style="margin-top: 10px;">
+        <button @click="generateFakeData">Générer Données de test</button>
       </div>
     </div>
 
-    <div style="margin-bottom: 20px; background: #f9f9f9; padding: 10px">
-      <h4>Recherche</h4>
-      <input
-        type="text"
-        v-model="searchQuery"
-        placeholder="Rechercher nom"
-        style="padding: 5px; width: 200px"
-      />
-      <button @click="rechercher">Rechercher</button>
-      <button
-        @click="
-          () => {
-            searchQuery = ''
-            recupererTousLesDocs()
-          }
-        "
-      >
-        Reset
-      </button>
-    </div>
-
-    <h3>Documents ({{ documents.length }})</h3>
-    <div v-if="documents.length === 0">rien trouvé</div>
-
-    <div
-      v-for="doc in documents"
-      :key="doc._id"
-      style="border: 1px solid #ccc; margin: 10px 0; padding: 10px"
-    >
-      <p><strong>ID:</strong> {{ doc._id }}</p>
-      <p>
-        <strong>Titre:</strong> {{ doc.title }}
-        <span v-if="doc.category">({{ doc.category }})</span>
-      </p>
-      <p><strong>Contenu:</strong> {{ doc.content }}</p>
-
-      <div style="margin-bottom: 10px">
-        <button @click="likerPost(doc)">Like Doc ({{ doc.likes || 0 }})</button>
-        <button @click="supprimerDoc(doc)" style="margin-left: 5px">Suppr</button>
+    <div class="section forms">
+      <div class="form-group">
+        <label>Nouvelle Catégorie :</label>
+        <input v-model="inputCatName" placeholder="Nom..." />
+        <button @click="addCategory">Ajouter Catégorie</button>
       </div>
 
-      <div style="background: #eee; padding: 10px; margin-top: 10px">
-        <strong>Commentaires:</strong>
-        <div
-          v-for="(com, idx) in doc.virtual_comments"
-          :key="idx"
-          style="border-bottom: 1px solid #ccc; padding: 5px"
-        >
-          {{ com.text }}
-          <button @click="likerCommentaire(doc, idx)" style="font-size: 0.8em; margin-left: 5px">
-            Like Com ({{ com.likes || 0 }})
-          </button>
-        </div>
-
-        <div style="margin-top: 5px">
-          <input v-model="nouveauCommentaireInput[doc._id]" placeholder="Nouveau commentaire" />
-          <button @click="ajouterCommentaire(doc)">Ajouter Com</button>
+      <div class="form-group" style="border-top: 1px dashed #ccc; padding-top: 10px;">
+        <label>Nouveau Post :</label>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+            <input v-model="inputTitle" placeholder="Titre (post_name)" />
+            <input v-model="inputBody" placeholder="Contenu (post_content)" style="flex-grow: 1;" />
+            
+            <select v-model="selectedCat">
+            <option value="">-- Catégorie --</option>
+            <option v-for="c in categories" :key="c._id" :value="c.name">{{ c.name }}</option>
+            </select>
+            
+            <button @click="addPost">Publier</button>
         </div>
       </div>
     </div>
+
+    <div class="section search">
+      <input type="text" v-model="query" placeholder="Recherche par nom..." />
+      <button @click="search">Chercher</button>
+      <button @click="topLikes">Top 10 Likes</button>
+      <button @click="() => { query = ''; fetchData() }">Reset</button>
+    </div>
+
+    <div class="post-list">
+      <h3>Liste des Posts ({{ posts.length }})</h3>
+
+      <div v-for="p in posts" :key="p._id" class="post-item">
+        <div class="post-header">
+          <strong>{{ p.post_name }}</strong> 
+          <span v-if="p.category" style="font-size: 0.8em; color: #666;">[{{ p.category }}]</span>
+          
+          <button @click="deletePost(p)" style="float: right;">Supprimer</button>
+        </div>
+
+        <p class="post-content">{{ p.post_content }}</p>
+        
+        <div class="post-actions">
+           Likes: {{ p.likes || 0 }} 
+           <button @click="likePost(p)">Like</button>
+        </div>
+
+        <div class="comments-box">
+          <div style="font-weight: bold; margin-bottom: 5px;">Commentaires :</div>
+          
+          <div v-for="(com, idx) in p.virtual_comments" :key="idx" class="comment-item">
+            - {{ com.text }} (Likes: {{ com.likes || 0 }})
+            <button @click="likeComment(p, idx)" style="font-size: 0.8em;">Like</button>
+          </div>
+
+          <div style="margin-top: 5px;">
+            <input v-model="draftComments[p._id]" placeholder="Votre commentaire" />
+            <button @click="addComment(p)">Ajouter</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
   </div>
 </template>
+
+<style>
+.container {
+  font-family: sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f4f4f4; 
+  color: #333333; 
+  min-height: 100vh;
+}
+
+input, select, textarea {
+  background-color: #ffffff;
+  color: #000000;
+  border: 1px solid #999;
+  padding: 5px;
+}
+
+.section {
+  border: 1px solid #ccc;
+  padding: 15px;
+  margin-bottom: 20px;
+  background-color: #ffffff; 
+  color: #000000; 
+}
+
+h2, h3 {
+  margin-top: 0;
+  color: #000000;
+}
+
+button {
+  cursor: pointer;
+  margin-right: 5px;
+  padding: 5px 10px;
+  background-color: #e0e0e0;
+  color: #000;
+  border: 1px solid #999;
+}
+
+.btn-red {
+  background-color: #ffcccc;
+  border: 1px solid red;
+  color: #cc0000;
+}
+
+.btn-green {
+  background-color: #ccffcc;
+  border: 1px solid green;
+  color: #006600;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.post-item {
+  border: 1px solid #999;
+  padding: 15px;
+  margin-bottom: 15px;
+  background-color: #ffffff; 
+  color: #000000; 
+}
+
+.post-header {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.post-content {
+  margin: 10px 0;
+  white-space: pre-wrap; 
+}
+
+.comments-box {
+  background-color: #f0f0f0; 
+  border: 1px solid #ddd;
+  padding: 10px;
+  margin-top: 15px;
+  color: #333;
+}
+
+.comment-item {
+  border-bottom: 1px dashed #ccc;
+  padding: 5px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+</style>
